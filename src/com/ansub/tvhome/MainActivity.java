@@ -134,9 +134,10 @@ public class MainActivity extends Activity {
     // the bottom right. Dark ones first, then bright ones that get darker towards the bottom, so the
     // white labels stay easy to read. Only colours, no images, so every one costs the same as Dusk,
     // the default.
-    private static final String[] WALLPAPER_NAMES = {"Dusk", "Midnight", "Plum", "Forest", "Graphite", "Ocean", "Ember",
+    private static final String[] WALLPAPER_NAMES = {"Chelsea", "Dusk", "Midnight", "Plum", "Forest", "Graphite", "Ocean", "Ember",
             "Sunset", "Lagoon", "Aurora", "Coral", "Iris", "Meadow", "Gold"};
     private static final int[][] WALLPAPERS = {
+        {0xFF0B2466, 0xFF071746, 0xFF030A24, 0x700A5CD6, 0x38DBA111},
         {0xFF15100F, 0xFF0A0809, 0xFF050405, 0x36FF8048, 0x2EAA3C8C},
         {0xFF0E1220, 0xFF080A13, 0xFF040509, 0x384A6CFF, 0x2E5A3CC8},
         {0xFF170E19, 0xFF0C070D, 0xFF050306, 0x38C050B4, 0x2E6440D2},
@@ -230,6 +231,20 @@ public class MainActivity extends Activity {
         tp.topMargin = px(-20); // pull the big digits up under the date
         clock.addView(time, tp);
         root.addView(clock, at(px(MARGIN), px(92), -2, -2));
+
+        fixturesCard = new LinearLayout(this);
+        fixturesCard.setOrientation(LinearLayout.VERTICAL);
+        fixturesCard.setFocusable(false);
+        int cp = px(28);
+        fixturesCard.setPadding(cp, px(22), cp, px(22));
+        GradientDrawable cardBg = new GradientDrawable();
+        cardBg.setCornerRadius(px(RADIUS));
+        cardBg.setColor(0x73000000);
+        cardBg.setStroke(Math.max(1, px(2)), 0x24FFFFFF);
+        fixturesCard.setBackground(cardBg);
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        root.addView(fixturesCard, at(screenW - px(MARGIN) - px(CARD_W), px(CARD_TOP), px(CARD_W), -2));
+        renderFixtures();
 
         moveHint = text(px(24), 0xA8FFFFFF, regular);
         moveHint.setText(Strings.t("Use the arrows to move it, then press OK"));
@@ -352,6 +367,8 @@ public class MainActivity extends Activity {
             buildTiles();
         }
         refreshNetwork();
+        renderFixtures();
+        maybeFetchFixtures();
         View f = getCurrentFocus();
         if (f == null && !tiles.isEmpty()) tiles.get(0).requestFocus();
         HomeButton.onHomeResumed(this); // back on this home screen: Home comes here again
@@ -456,6 +473,10 @@ public class MainActivity extends Activity {
     }
 
     private void showWallpaper(int i) {
+        if (i == 0) {
+            Drawable photo = photoBackground();
+            if (photo != null) { getWindow().setBackgroundDrawable(photo); return; }
+        }
         getWindow().setBackgroundDrawable(background(WALLPAPERS[i]));
     }
 
@@ -527,6 +548,7 @@ public class MainActivity extends Activity {
         int bottomTop = gridTop + rows * px(ROW_STEP);
         ((FrameLayout.LayoutParams) moveHint.getLayoutParams()).topMargin = gridTop - px(64);
         root.setMinimumHeight(bottomTop + h + px(MARGIN));
+        renderFixtures();
 
         for (String pkg : apps) {
             Intent li = launchIntent(pm, pkg);
@@ -1524,6 +1546,254 @@ public class MainActivity extends Activity {
         } catch (Throwable t) {
             return d;
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Photo wallpaper: put a picture at
+    //   /sdcard/Android/data/com.ansub.tvhome/files/wallpaper.jpg   (or wallpaper.png)
+    // with  adb push foto.jpg /sdcard/Android/data/com.ansub.tvhome/files/wallpaper.jpg
+    // It's used by the first wallpaper ("Chelsea"); without a photo that one is a deep blue gradient.
+    private File photoFile() {
+        File d = getExternalFilesDir(null);
+        if (d == null) return null;
+        File jpg = new File(d, "wallpaper.jpg");
+        if (jpg.exists()) return jpg;
+        File png = new File(d, "wallpaper.png");
+        return png.exists() ? png : null;
+    }
+
+    private Drawable photoBackground() {
+        File f = photoFile();
+        if (f == null) return null;
+        try {
+            int w = getResources().getDisplayMetrics().widthPixels, h = getResources().getDisplayMetrics().heightPixels;
+            android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            android.graphics.BitmapFactory.decodeFile(f.getPath(), o);
+            if (o.outWidth <= 0 || o.outHeight <= 0) return null;
+            int sample = 1;
+            while (o.outWidth / (sample * 2) >= w && o.outHeight / (sample * 2) >= h) sample *= 2;
+            o = new android.graphics.BitmapFactory.Options();
+            o.inSampleSize = sample;
+            Bitmap src = android.graphics.BitmapFactory.decodeFile(f.getPath(), o);
+            if (src == null) return null;
+            Bitmap bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Canvas cv = new Canvas(bm);
+            float s = Math.max(w / (float) src.getWidth(), h / (float) src.getHeight());
+            int dw = Math.round(src.getWidth() * s), dh = Math.round(src.getHeight() * s);
+            android.graphics.Rect dst = new android.graphics.Rect((w - dw) / 2, (h - dh) / 2, (w - dw) / 2 + dw, (h - dh) / 2 + dh);
+            cv.drawBitmap(src, null, dst, new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG));
+            src.recycle();
+            // Darker at the top (clock, games) and at the bottom (app tiles), so white text stays readable.
+            GradientDrawable shade = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[] {0x8C000000, 0x40000000, 0xB3000000});
+            shade.setBounds(0, 0, w, h);
+            shade.draw(cv);
+            return new BitmapDrawable(getResources(), bm);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Chelsea: next matches, from ESPN's public schedule (no key needed). Checked at most every
+    // 3 hours when the home screen opens; the last list is kept, so it still shows when offline.
+    private static final String TEAM_ID = "363"; // Chelsea on ESPN
+    private static final String[][] LEAGUES = {
+        {"eng.1", "Premier League"}, {"uefa.champions", "Champions League"}, {"uefa.europa", "Liga Europa"},
+        {"uefa.europa.conf", "Conference League"}, {"eng.fa", "Copa da Inglaterra"},
+        {"eng.league_cup", "Copa da Liga"}, {"fifa.cwc", "Mundial de Clubes"}, {"club.friendly", "Amistoso"},
+    };
+    private static final long FIXTURES_TTL = 3 * 3600 * 1000L, FIXTURES_RETRY = 10 * 60 * 1000L;
+    private static final int CARD_W = 700, CARD_TOP = 168, FIX_ROW = 84;
+    private static final java.util.Locale PT_BR = new java.util.Locale("pt", "BR");
+    private LinearLayout fixturesCard;
+    private volatile boolean fetching;
+
+    private void maybeFetchFixtures() {
+        final SharedPreferences p = prefs();
+        long now = System.currentTimeMillis();
+        if (fetching || now - p.getLong("fixtures_at", 0) < FIXTURES_TTL || now - p.getLong("fixtures_try", 0) < FIXTURES_RETRY) return;
+        fetching = true;
+        p.edit().putLong("fixtures_try", now).apply();
+        new Thread(() -> {
+            List<String[]> found = new ArrayList<>();
+            Set<String> seen = new HashSet<>();
+            boolean reached = false;
+            for (String[] lg : LEAGUES) {
+                try {
+                    String body = httpGet("https://site.api.espn.com/apis/site/v2/sports/soccer/" + lg[0]
+                            + "/teams/" + TEAM_ID + "/schedule?fixture=true");
+                    reached = true;
+                    org.json.JSONArray ev = new org.json.JSONObject(body).optJSONArray("events");
+                    if (ev == null) continue;
+                    for (int i = 0; i < ev.length(); i++) {
+                        String[] m = parseEvent(ev.optJSONObject(i), lg[1]);
+                        if (m != null && seen.add(m[4])) found.add(m);
+                    }
+                } catch (Throwable ignored) {}
+            }
+            if (reached) {
+                StringBuilder sb = new StringBuilder();
+                for (String[] m : found) sb.append(m[0]).append('\t').append(m[1]).append('\t').append(m[2]).append('\t').append(m[3]).append('\n');
+                p.edit().putString("fixtures", sb.toString()).putLong("fixtures_at", System.currentTimeMillis()).apply();
+            }
+            fetching = false;
+            runOnUiThread(this::renderFixtures);
+        }).start();
+        renderFixtures();
+    }
+
+    // {epoch ms, home, away, competition, id}, or null.
+    private static String[] parseEvent(org.json.JSONObject e, String comp) {
+        if (e == null) return null;
+        long when = parseUtc(e.optString("date"));
+        if (when <= 0) return null;
+        String home = "", away = "";
+        org.json.JSONArray comps = e.optJSONArray("competitions");
+        org.json.JSONObject c = comps == null ? null : comps.optJSONObject(0);
+        org.json.JSONArray teams = c == null ? null : c.optJSONArray("competitors");
+        if (teams != null) for (int i = 0; i < teams.length(); i++) {
+            org.json.JSONObject t = teams.optJSONObject(i);
+            if (t == null) continue;
+            org.json.JSONObject team = t.optJSONObject("team");
+            String name = team == null ? "" : team.optString("shortDisplayName", team.optString("displayName", ""));
+            if ("home".equals(t.optString("homeAway"))) home = name; else away = name;
+        }
+        if (home.isEmpty() || away.isEmpty()) {
+            String[] parts = e.optString("name").split(" at ");
+            if (parts.length != 2) return null;
+            away = parts[0].trim();
+            home = parts[1].trim();
+        }
+        String id = e.optString("id", when + home);
+        return new String[] {String.valueOf(when), clean(home), clean(away), comp, id};
+    }
+
+    private static String clean(String s) { return s.replace('\t', ' ').replace('\n', ' ').trim(); }
+
+    // ESPN dates look like 2026-11-21T15:00Z (UTC).
+    private static long parseUtc(String s) {
+        if (s == null || s.length() < 16) return -1;
+        try {
+            java.text.SimpleDateFormat f = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm", java.util.Locale.US);
+            f.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            return f.parse(s.substring(0, 16)).getTime();
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private static String httpGet(String url) throws java.io.IOException {
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        c.setConnectTimeout(8000);
+        c.setReadTimeout(8000);
+        c.setRequestProperty("User-Agent", "tvhome");
+        try {
+            if (c.getResponseCode() != 200) throw new java.io.IOException("HTTP " + c.getResponseCode());
+            java.io.InputStream in = c.getInputStream();
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
+            return out.toString("UTF-8");
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    // Saved matches still to come (or that started less than 2 hours ago), soonest first.
+    private List<String[]> upcoming() {
+        List<String[]> out = new ArrayList<>();
+        String saved = prefs().getString("fixtures", "");
+        long cutoff = System.currentTimeMillis() - 2 * 3600 * 1000L;
+        for (String line : saved.split("\n")) {
+            String[] m = line.split("\t");
+            if (m.length < 4) continue;
+            try { if (Long.parseLong(m[0]) > cutoff) out.add(m); } catch (NumberFormatException ignored) {}
+        }
+        Collections.sort(out, (a, b) -> Long.compare(Long.parseLong(a[0]), Long.parseLong(b[0])));
+        return out;
+    }
+
+    private void renderFixtures() {
+        if (fixturesCard == null) return;
+        fixturesCard.removeAllViews();
+        int top = gridTop > 0 ? gridTop : px(ROW1_TOP);
+        int room = top - px(48) - px(CARD_TOP) - px(44) - px(44);
+        int max = Math.max(1, Math.min(3, room / px(FIX_ROW)));
+
+        TextView head = text(px(21), 0xFF9DBBFF, semibold);
+        head.setText("CHELSEA  ·  PRÓXIMOS JOGOS");
+        head.setLetterSpacing(0.14f);
+        head.setSingleLine(true);
+        fixturesCard.addView(head, new LinearLayout.LayoutParams(-2, -2));
+
+        List<String[]> list = upcoming();
+        if (list.isEmpty()) {
+            TextView msg = text(px(26), 0xB3FFFFFF, regular);
+            boolean loaded = prefs().getLong("fixtures_at", 0) > 0;
+            msg.setText(fetching ? "Atualizando…" : loaded ? "Nenhum jogo marcado por enquanto" : "Sem conexão para buscar os jogos");
+            LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(-2, -2);
+            mp.topMargin = px(14);
+            fixturesCard.addView(msg, mp);
+            return;
+        }
+
+        java.text.SimpleDateFormat day = new java.text.SimpleDateFormat("EEE dd/MM", PT_BR);
+        java.text.SimpleDateFormat hour = new java.text.SimpleDateFormat("HH:mm", PT_BR);
+        for (int i = 0; i < Math.min(max, list.size()); i++) {
+            String[] m = list.get(i);
+            java.util.Date when = new java.util.Date(Long.parseLong(m[0]));
+
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+
+            LinearLayout left = new LinearLayout(this);
+            left.setOrientation(LinearLayout.VERTICAL);
+            TextView d = text(px(20), 0x99FFFFFF, semibold);
+            d.setText(day.format(when).replace(".", "").toUpperCase(PT_BR));
+            d.setLetterSpacing(0.06f);
+            TextView t = text(px(38), Color.WHITE, semibold);
+            t.setText(hour.format(when));
+            t.setIncludeFontPadding(false);
+            left.addView(d);
+            left.addView(t);
+            row.addView(left, new LinearLayout.LayoutParams(px(150), -2));
+
+            LinearLayout right = new LinearLayout(this);
+            right.setOrientation(LinearLayout.VERTICAL);
+            TextView vs = text(px(29), Color.WHITE, semibold);
+            vs.setText(m[1] + "  x  " + m[2]);
+            vs.setSingleLine(true);
+            vs.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            TextView sub = text(px(21), 0x99FFFFFF, regular);
+            sub.setText(m[3] + "  ·  " + relativeDay(when) + ("Chelsea".equals(m[1]) ? "  ·  em casa" : "  ·  fora"));
+            sub.setSingleLine(true);
+            sub.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            right.addView(vs);
+            right.addView(sub);
+            row.addView(right, new LinearLayout.LayoutParams(0, -2, 1f));
+
+            LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
+            rp.topMargin = px(i == 0 ? 16 : 14);
+            fixturesCard.addView(row, rp);
+        }
+    }
+
+    private static String relativeDay(java.util.Date when) {
+        java.util.Calendar a = java.util.Calendar.getInstance(), b = java.util.Calendar.getInstance();
+        b.setTime(when);
+        for (java.util.Calendar c : new java.util.Calendar[] {a, b}) {
+            c.set(java.util.Calendar.HOUR_OF_DAY, 12);
+            c.set(java.util.Calendar.MINUTE, 0);
+            c.set(java.util.Calendar.SECOND, 0);
+            c.set(java.util.Calendar.MILLISECOND, 0);
+        }
+        long days = Math.round((b.getTimeInMillis() - a.getTimeInMillis()) / 86400000.0);
+        if (days <= 0) return "hoje";
+        if (days == 1) return "amanhã";
+        return "em " + days + " dias";
     }
 
     private int px(int v) {
