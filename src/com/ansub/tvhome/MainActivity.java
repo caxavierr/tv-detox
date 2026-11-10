@@ -1614,7 +1614,12 @@ public class MainActivity extends Activity {
     private void maybeFetchFixtures() {
         final SharedPreferences p = prefs();
         long now = System.currentTimeMillis();
-        if (fetching || now - p.getLong("fixtures_at", 0) < FIXTURES_TTL || now - p.getLong("fixtures_try", 0) < FIXTURES_RETRY) return;
+        long updated = 0;
+        try { updated = getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime; } catch (Exception ignored) {}
+        long tried = p.getLong("fixtures_try", 0);
+        boolean fresh = updated > tried; // a new version was installed since the last try: fetch now
+        if (fetching || (!fresh && (now - p.getLong("fixtures_at", 0) < FIXTURES_TTL || now - tried < FIXTURES_RETRY))) return;
+        android.util.Log.i("tvhome", "fixtures: fetching");
         fetching = true;
         p.edit().putLong("fixtures_try", now).apply();
         new Thread(() -> {

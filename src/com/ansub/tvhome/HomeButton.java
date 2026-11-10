@@ -25,11 +25,13 @@ public class HomeButton extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
+        android.util.Log.i("tvhome", "HomeButton event type=" + event.getEventType() + " pkg=" + event.getPackageName()
+                + " class=" + event.getClassName() + " setupDone=" + setupDone());
         if (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 || !GOOGLE_TV_HOME.getPackageName().equals(String.valueOf(event.getPackageName()))
                 || !GOOGLE_TV_HOME.getClassName().equals(String.valueOf(event.getClassName())) || !setupDone()) return;
         SharedPreferences prefs = prefs(this);
-        if (stayingOnGoogleTv(prefs)) return;
+        if (stayingOnGoogleTv(prefs)) { android.util.Log.i("tvhome", "HomeButton: staying on Google TV (Back was held)"); return; }
         long now = SystemClock.elapsedRealtime();
         if (now - lastOpened < 500) return;
 
@@ -38,6 +40,7 @@ public class HomeButton extends AccessibilityService {
         if (pending >= 0 && now >= pending && now - pending < 3000) return;
         int failures = prefs.getInt("failures", 0);
         if (pending >= 0) failures++;
+        android.util.Log.i("tvhome", "HomeButton: pending=" + pending + " failures=" + failures);
         if (failures >= 3) {
             prefs.edit().remove("pending").putInt("failures", failures).commit();
             return;
@@ -52,6 +55,14 @@ public class HomeButton extends AccessibilityService {
 
     @Override
     public void onInterrupt() {}
+
+    @Override
+    protected void onServiceConnected() {
+        super.onServiceConnected();
+        android.util.Log.i("tvhome", "HomeButton connected");
+        // A fresh start of the service clears an old stopped redirect loop.
+        prefs(this).edit().remove("pending").remove("failures").commit();
+    }
 
     // During the TV's first setup, Home is left alone.
     private boolean setupDone() {
