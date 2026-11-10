@@ -1605,7 +1605,8 @@ public class MainActivity extends Activity {
         {"eng.league_cup", "Copa da Liga"}, {"fifa.cwc", "Mundial de Clubes"}, {"club.friendly", "Amistoso"},
     };
     private static final long FIXTURES_TTL = 3 * 3600 * 1000L, FIXTURES_RETRY = 10 * 60 * 1000L;
-    private static final int CARD_W = 700, CARD_TOP = 168, FIX_ROW = 84;
+    private static final int CARD_W = 1100, CARD_TOP = 168;
+    private static final String[] HOSTS = {"site.api.espn.com", "site.web.api.espn.com"};
     private static final java.util.Locale PT_BR = new java.util.Locale("pt", "BR");
     private LinearLayout fixturesCard;
     private volatile boolean fetching;
@@ -1620,19 +1621,33 @@ public class MainActivity extends Activity {
             List<String[]> found = new ArrayList<>();
             Set<String> seen = new HashSet<>();
             boolean reached = false;
+            String lastError = null;
             for (String[] lg : LEAGUES) {
+                String body = null;
+                for (String host : HOSTS) {
+                    try {
+                        body = httpGet("https://" + host + "/apis/site/v2/sports/soccer/" + lg[0]
+                                + "/teams/" + TEAM_ID + "/schedule?fixture=true");
+                        break;
+                    } catch (Throwable t) {
+                        lastError = t.getClass().getSimpleName() + ": " + t.getMessage();
+                        android.util.Log.w("tvhome", "fixtures " + lg[0] + " via " + host, t);
+                    }
+                }
+                if (body == null) continue;
+                reached = true;
                 try {
-                    String body = httpGet("https://site.api.espn.com/apis/site/v2/sports/soccer/" + lg[0]
-                            + "/teams/" + TEAM_ID + "/schedule?fixture=true");
-                    reached = true;
                     org.json.JSONArray ev = new org.json.JSONObject(body).optJSONArray("events");
                     if (ev == null) continue;
                     for (int i = 0; i < ev.length(); i++) {
                         String[] m = parseEvent(ev.optJSONObject(i), lg[1]);
                         if (m != null && seen.add(m[4])) found.add(m);
                     }
-                } catch (Throwable ignored) {}
+                } catch (Throwable t) {
+                    android.util.Log.w("tvhome", "fixtures parse " + lg[0], t);
+                }
             }
+            p.edit().putString("fixtures_error", reached ? null : lastError).apply();
             if (reached) {
                 StringBuilder sb = new StringBuilder();
                 for (String[] m : found) sb.append(m[0]).append('\t').append(m[1]).append('\t').append(m[2]).append('\t').append(m[3]).append('\n');
@@ -1688,7 +1703,8 @@ public class MainActivity extends Activity {
         java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
         c.setConnectTimeout(8000);
         c.setReadTimeout(8000);
-        c.setRequestProperty("User-Agent", "tvhome");
+        c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 11; Smart TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36");
+        c.setRequestProperty("Accept", "application/json");
         try {
             if (c.getResponseCode() != 200) throw new java.io.IOException("HTTP " + c.getResponseCode());
             java.io.InputStream in = c.getInputStream();
@@ -1718,11 +1734,8 @@ public class MainActivity extends Activity {
     private void renderFixtures() {
         if (fixturesCard == null) return;
         fixturesCard.removeAllViews();
-        int top = gridTop > 0 ? gridTop : px(ROW1_TOP);
-        int room = top - px(48) - px(CARD_TOP) - px(44) - px(44);
-        int max = Math.max(1, Math.min(3, room / px(FIX_ROW)));
 
-        TextView head = text(px(21), 0xFF9DBBFF, semibold);
+        TextView head = text(px(20), 0xFF9DBBFF, semibold);
         head.setText("CHELSEA  ·  PRÓXIMOS JOGOS");
         head.setLetterSpacing(0.14f);
         head.setSingleLine(true);
@@ -1730,55 +1743,64 @@ public class MainActivity extends Activity {
 
         List<String[]> list = upcoming();
         if (list.isEmpty()) {
-            TextView msg = text(px(26), 0xB3FFFFFF, regular);
-            boolean loaded = prefs().getLong("fixtures_at", 0) > 0;
-            msg.setText(fetching ? "Atualizando…" : loaded ? "Nenhum jogo marcado por enquanto" : "Sem conexão para buscar os jogos");
+            TextView msg = text(px(24), 0xB3FFFFFF, regular);
+            SharedPreferences p = prefs();
+            String err = p.getString("fixtures_error", null);
+            boolean loaded = p.getLong("fixtures_at", 0) > 0;
+            msg.setText(fetching ? "Atualizando…" : loaded ? "Nenhum jogo marcado por enquanto"
+                    : "Não consegui buscar os jogos" + (err != null ? " (" + err + ")" : ""));
+            msg.setMaxLines(2);
             LinearLayout.LayoutParams mp = new LinearLayout.LayoutParams(-2, -2);
-            mp.topMargin = px(14);
+            mp.topMargin = px(10);
             fixturesCard.addView(msg, mp);
             return;
         }
 
         java.text.SimpleDateFormat day = new java.text.SimpleDateFormat("EEE dd/MM", PT_BR);
         java.text.SimpleDateFormat hour = new java.text.SimpleDateFormat("HH:mm", PT_BR);
-        for (int i = 0; i < Math.min(max, list.size()); i++) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        int n = Math.min(3, list.size());
+        for (int i = 0; i < n; i++) {
             String[] m = list.get(i);
             java.util.Date when = new java.util.Date(Long.parseLong(m[0]));
+            boolean home = "Chelsea".equals(m[1]);
+            String opponent = home ? m[2] : m[1];
 
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout col = new LinearLayout(this);
+            col.setOrientation(LinearLayout.VERTICAL);
+            if (i > 0) col.setPadding(px(24), 0, 0, 0);
 
-            LinearLayout left = new LinearLayout(this);
-            left.setOrientation(LinearLayout.VERTICAL);
-            TextView d = text(px(20), 0x99FFFFFF, semibold);
-            d.setText(day.format(when).replace(".", "").toUpperCase(PT_BR));
-            d.setLetterSpacing(0.06f);
-            TextView t = text(px(38), Color.WHITE, semibold);
-            t.setText(hour.format(when));
-            t.setIncludeFontPadding(false);
-            left.addView(d);
-            left.addView(t);
-            row.addView(left, new LinearLayout.LayoutParams(px(150), -2));
+            TextView when1 = text(px(22), 0xB3FFFFFF, semibold);
+            String d = day.format(when).replace(".", "");
+            when1.setText(Character.toUpperCase(d.charAt(0)) + d.substring(1) + "  ·  " + hour.format(when));
+            when1.setSingleLine(true);
 
-            LinearLayout right = new LinearLayout(this);
-            right.setOrientation(LinearLayout.VERTICAL);
-            TextView vs = text(px(29), Color.WHITE, semibold);
-            vs.setText(m[1] + "  x  " + m[2]);
+            TextView vs = text(px(30), Color.WHITE, semibold);
+            vs.setText((home ? "x " : "@ ") + opponent);
             vs.setSingleLine(true);
             vs.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            TextView sub = text(px(21), 0x99FFFFFF, regular);
-            sub.setText(m[3] + "  ·  " + relativeDay(when) + ("Chelsea".equals(m[1]) ? "  ·  em casa" : "  ·  fora"));
+
+            TextView sub = text(px(19), 0x8CFFFFFF, regular);
+            sub.setText(m[3] + "  ·  " + relativeDay(when));
             sub.setSingleLine(true);
             sub.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            right.addView(vs);
-            right.addView(sub);
-            row.addView(right, new LinearLayout.LayoutParams(0, -2, 1f));
 
-            LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
-            rp.topMargin = px(i == 0 ? 16 : 14);
-            fixturesCard.addView(row, rp);
+            col.addView(when1);
+            LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(-1, -2);
+            vp.topMargin = px(4);
+            col.addView(vs, vp);
+            col.addView(sub);
+            row.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
         }
+        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
+        rp.topMargin = px(12);
+        fixturesCard.addView(row, rp);
+        TextView legend = text(px(17), 0x66FFFFFF, regular);
+        legend.setText("x = em casa    @ = fora");
+        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(-2, -2);
+        lp2.topMargin = px(8);
+        fixturesCard.addView(legend, lp2);
     }
 
     private static String relativeDay(java.util.Date when) {
