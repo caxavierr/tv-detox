@@ -158,6 +158,9 @@ public class MainActivity extends Activity {
     private static Typeface regular, semibold;
 
     private FrameLayout root; // the page, inside a vertical scroller
+    private android.widget.HorizontalScrollView appStrip; // one row of apps that scrolls sideways
+    private FrameLayout appRow;
+    private static final int STRIP_PAD = 30; // room above and below for the focus lift
     private int tileW, tileH, gridTop; // app grid geometry, set by buildTiles
     private final List<View> tiles = new ArrayList<>();
     private final Map<View, ValueAnimator> lifts = new WeakHashMap<>(); // a running focus fade per tile
@@ -231,6 +234,20 @@ public class MainActivity extends Activity {
         tp.topMargin = px(-20); // pull the big digits up under the date
         clock.addView(time, tp);
         root.addView(clock, at(px(MARGIN), px(92), -2, -2));
+
+        appStrip = new android.widget.HorizontalScrollView(this);
+        appStrip.setHorizontalScrollBarEnabled(false);
+        appStrip.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        appStrip.setClipChildren(false);
+        appStrip.setClipToPadding(false);
+        appStrip.setFillViewport(true);
+        appStrip.setSmoothScrollingEnabled(true);
+        appStrip.setHorizontalFadingEdgeEnabled(true);
+        appStrip.setFadingEdgeLength(px(90));
+        appRow = new FrameLayout(this);
+        appRow.setClipChildren(false);
+        appStrip.addView(appRow, new FrameLayout.LayoutParams(-2, -1));
+        root.addView(appStrip, at(0, px(ROW1_TOP), -1, -2));
 
         fixturesCard = new LinearLayout(this);
         fixturesCard.setOrientation(LinearLayout.VERTICAL);
@@ -543,7 +560,7 @@ public class MainActivity extends Activity {
         // the bottom row still fit on screen; past that the page scrolls.
         int launchable = 0;
         for (String pkg : apps) if (launchIntent(pm, pkg) != null) launchable++;
-        int rows = Math.max(1, (launchable + PER_ROW - 1) / PER_ROW);
+        int rows = 1; // apps sit in one row that scrolls sideways
         gridTop = Math.max(px(GRID_MIN_TOP), px(ROW1_TOP) - (rows - 1) * px(ROW_STEP));
         int bottomTop = gridTop + rows * px(ROW_STEP);
         ((FrameLayout.LayoutParams) moveHint.getLayoutParams()).topMargin = gridTop - px(64);
@@ -565,8 +582,16 @@ public class MainActivity extends Activity {
             if (banner == null) try { icon = pm.getApplicationIcon(pkg); } catch (Exception ignored) {}
             int i = rowApps.size();
             rowApps.add(pkg);
-            addTile(root, pkg, label, banner, null, icon, gridX(i), gridY(i), w, h);
+            addTile(appRow, pkg, label, banner, null, icon, gridX(i), gridY(i), w, h);
         }
+
+        // The strip: as tall as a row plus room for the lift, as wide as all the apps.
+        int n = rowApps.size();
+        appRow.setMinimumWidth(2 * m + Math.max(0, n * (w + g) - g));
+        FrameLayout.LayoutParams sp = (FrameLayout.LayoutParams) appStrip.getLayoutParams();
+        sp.topMargin = gridTop - px(STRIP_PAD);
+        sp.height = px(ROW_STEP) + 2 * px(STRIP_PAD);
+        appStrip.setLayoutParams(sp);
 
         // Bottom row: Play Store, HDMI inputs, Settings and Add app, six at most.
         int col = 0;
@@ -1361,11 +1386,11 @@ public class MainActivity extends Activity {
 
     // Where app number i sits in the grid.
     private int gridX(int i) {
-        return px(MARGIN) + (i % PER_ROW) * (tileW + px(GAP));
+        return px(MARGIN) + i * (tileW + px(GAP));
     }
 
     private int gridY(int i) {
-        return gridTop + (i / PER_ROW) * px(ROW_STEP);
+        return px(STRIP_PAD); // inside the sideways strip
     }
 
     private View tile(String key) {
@@ -1388,7 +1413,7 @@ public class MainActivity extends Activity {
 
     private boolean moveKey(String key, int code, boolean ok, boolean down) {
         int step = code == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : code == KeyEvent.KEYCODE_DPAD_RIGHT ? 1
-                : code == KeyEvent.KEYCODE_DPAD_UP ? -PER_ROW : code == KeyEvent.KEYCODE_DPAD_DOWN ? PER_ROW : 0;
+                : 0; // one row: up and down don't move it
         if (step != 0) {
             int from = rowApps.indexOf(key), to = from + step;
             if (down && to >= 0 && to < rowApps.size()) {
