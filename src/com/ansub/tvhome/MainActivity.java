@@ -1643,7 +1643,9 @@ public class MainActivity extends Activity {
         try { updated = getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime; } catch (Exception ignored) {}
         long tried = p.getLong("fixtures_try", 0);
         boolean fresh = updated > tried; // a new version was installed since the last try: fetch now
-        if (fetching || (!fresh && (now - p.getLong("fixtures_at", 0) < FIXTURES_TTL || now - tried < FIXTURES_RETRY))) return;
+        // A try that never finished (the app was closed mid-way) doesn't count as a try.
+        boolean finished = p.getLong("fixtures_done", 0) >= tried;
+        if (fetching || (!fresh && (now - p.getLong("fixtures_at", 0) < FIXTURES_TTL || (finished && now - tried < FIXTURES_RETRY)))) return;
         android.util.Log.i("tvhome", "fixtures: fetching");
         fetching = true;
         p.edit().putLong("fixtures_try", now).apply();
@@ -1677,7 +1679,8 @@ public class MainActivity extends Activity {
                     android.util.Log.w("tvhome", "fixtures parse " + lg[0], t);
                 }
             }
-            p.edit().putString("fixtures_error", reached ? null : lastError).apply();
+            p.edit().putString("fixtures_error", reached ? null : lastError).putLong("fixtures_done", System.currentTimeMillis()).apply();
+            android.util.Log.i("tvhome", "fixtures: done, reached=" + reached + " found=" + found.size() + " error=" + lastError);
             if (reached) {
                 StringBuilder sb = new StringBuilder();
                 for (String[] m : found) sb.append(m[0]).append('\t').append(m[1]).append('\t').append(m[2]).append('\t').append(m[3]).append('\n');
